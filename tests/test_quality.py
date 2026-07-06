@@ -1,4 +1,5 @@
 import pytest
+from pyspark.sql.types import IntegerType, StructField, StructType
 
 from etl.quality import (
     DataQualityError,
@@ -10,7 +11,8 @@ from etl.quality import (
 
 
 def test_not_null_detects_nulls(spark):
-    df = spark.createDataFrame([(1,), (None,)], ["x"])
+    schema = StructType([StructField("x", IntegerType(), True)])
+    df = spark.createDataFrame([(1,), (None,)], schema)
     assert check_not_null(df, "x").passed is False
 
 
@@ -25,6 +27,7 @@ def test_unique_detects_duplicates(spark):
 
 
 def test_run_checks_raises_on_failure(spark):
-    df = spark.createDataFrame([(None,)], ["x"])
+    schema = StructType([StructField("x", IntegerType(), True)])
+    df = spark.createDataFrame([(None,)], schema)
     with pytest.raises(DataQualityError):
         run_checks([check_not_null(df, "x")])
