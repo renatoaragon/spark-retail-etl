@@ -17,7 +17,9 @@ from pyspark.sql import functions as F
 from etl.config import PATHS
 from etl.extract import read_customers, read_orders
 from etl.incremental import (
+    append_volume,
     high_watermark,
+    read_volume_history,
     read_watermark,
     select_new,
     write_watermark,
@@ -26,6 +28,7 @@ from etl.quality import (
     check_non_negative,
     check_not_null,
     check_unique,
+    check_volume_anomaly,
     run_checks,
 )
 from etl.transform import (
@@ -62,6 +65,7 @@ def run(spark: SparkSession, full_refresh: bool = False) -> None:
         _clear(PATHS.clean)
         _clear(PATHS.curated)
         _clear(PATHS.watermark)
+        _clear(PATHS.volume_history)
 
     orders = read_orders(spark, PATHS.raw_orders)
 
@@ -77,11 +81,14 @@ def run(spark: SparkSession, full_refresh: bool = False) -> None:
         return
 
     clean = clean_orders(new_orders)
+    batch_count = clean.count()
+    history = [] if full_refresh else read_volume_history(PATHS.volume_history)
     run_checks(
         [
             check_not_null(clean, "order_id"),
             check_unique(clean, "order_id"),
             check_non_negative(clean, "unit_price"),
+            check_volume_anomaly(batch_count, history),
         ]
     )
 
@@ -105,9 +112,11 @@ def run(spark: SparkSession, full_refresh: bool = False) -> None:
 
     curated.write.partitionBy(PARTITION_COL).mode("overwrite").parquet(PATHS.curated)
 
-    # Advance the watermark only after the mart write succeeds. If anything
-    # above fails, the watermark stays put and the whole batch is retried on the
-    # next run rather than being silently skipped with a stale mart.
+    # Advance the watermark and record this run's volume only after the mart
+    # write succeeds. If anything above fails, the watermark stays put and the
+    # whole batch is retried on the next run rather than being silently skipped
+    # with a stale mart.
+    append_volume(PATHS.volume_history, batch_count)
     write_watermark(PATHS.watermark, batch_high)
     print(
         f"Processed up to watermark {batch_high}; "

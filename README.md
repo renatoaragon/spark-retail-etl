@@ -32,8 +32,8 @@ unit test suite in CI.
                     └──────┬──────┘
                            ▼
                     ┌─────────────┐
-                    │  quality    │  not-null / unique / non-negative gates
-                    └──────┬──────┘  (raises and stops on failure)
+                    │  quality    │  not-null / unique / non-negative +
+                    └──────┬──────┘  volume-anomaly gate (raises on failure)
                            ▼
                     ┌─────────────┐
                     │ clean layer │  append batch → data/clean/orders (Parquet)
@@ -112,6 +112,13 @@ runs it on every push and pull request via GitHub Actions.
   trivial to unit test without touching the filesystem.
 - **Quality as a gate** — `run_checks` raises `DataQualityError`, so bad data
   never reaches the curated layer.
+- **Volume-anomaly detection** — beyond per-row checks, each run's row count is
+  compared against the **median** of recent runs (recorded under `data/_state/`)
+  and fails if it lands outside `median ± 50%`. This catches failures the row
+  checks can't see — a truncated source (far too few rows) or a duplicated/fan-out
+  load (far too many). The median (not mean) resists a single spike skewing the
+  baseline; the check stays quiet until a few runs of history exist, so it never
+  blocks a cold start. The count is recorded only after a run fully succeeds.
 - **Incremental by watermark** — only new source rows are processed each run. The
   watermark is advanced from the *raw* batch (before cleaning drops rows), so an
   invalid row is never re-read just because it was filtered out. It is written

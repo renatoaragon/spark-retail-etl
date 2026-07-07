@@ -32,6 +32,31 @@ def write_watermark(path: str, value: str) -> None:
     p.write_text(value, encoding="utf-8")
 
 
+def read_volume_history(path: str) -> list:
+    """Return the recorded row counts of past successful runs (oldest first)."""
+    p = Path(path)
+    if not p.exists():
+        return []
+    counts = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            counts.append(int(line))
+        except ValueError:
+            continue
+    return counts
+
+
+def append_volume(path: str, count: int) -> None:
+    """Record this run's row count, creating the state directory if needed."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(f"{count}\n")
+
+
 def select_new(
     orders: DataFrame, watermark: Optional[str], col: str = WATERMARK_COL
 ) -> DataFrame:
