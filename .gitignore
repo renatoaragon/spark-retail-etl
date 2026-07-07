@@ -8,6 +8,8 @@ venv/
 
 # Spark / output
 data/curated/
+data/clean/
+data/_state/
 spark-warehouse/
 metastore_db/
 derby.log
