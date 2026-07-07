@@ -7,8 +7,10 @@
 
 A small, production-shaped **batch ETL pipeline built with PySpark**. It takes raw
 retail orders through a **raw → clean → curated** flow, enforces **data quality
-gates** before writing, and produces a curated analytics mart. Runs locally with
-committed synthetic data and is covered by a unit test suite in CI.
+gates** before writing, and produces a curated analytics mart. The pipeline is
+**incremental**: each run processes only source rows newer than a persisted
+high-watermark. Runs locally with committed synthetic data and is covered by a
+unit test suite in CI.
 
 > Built to demonstrate how I structure data pipelines: typed schemas, testable
 > pure transformations, explicit quality checks, and reproducible sample data.
@@ -22,6 +24,10 @@ committed synthetic data and is covered by a unit test suite in CI.
                     └──────┬──────┘
                            ▼
                     ┌─────────────┐
+ watermark ────────▶│  select_new │  keep only rows newer than last run
+                    └──────┬──────┘
+                           ▼
+                    ┌─────────────┐
                     │   clean     │  drop invalid rows, cast types, dedupe
                     └──────┬──────┘
                            ▼
@@ -30,8 +36,12 @@ committed synthetic data and is covered by a unit test suite in CI.
                     └──────┬──────┘  (raises and stops on failure)
                            ▼
                     ┌─────────────┐
+                    │ clean layer │  append batch → data/clean/orders (Parquet)
+                    └──────┬──────┘  advance watermark to batch max(order_ts)
+                           ▼
+                    ┌─────────────┐
                     │   enrich    │  revenue = qty × price, join customer country
-                    └──────┬──────┘
+                    └──────┬──────┘  (rebuilt from the full clean layer)
                            ▼
                     ┌─────────────┐
                     │  curated    │  daily revenue / orders / units per category
@@ -40,12 +50,27 @@ committed synthetic data and is covered by a unit test suite in CI.
             data/curated/daily_category_revenue (Parquet)
 ```
 
+### Incremental load
+
+The high-watermark is the maximum `order_ts` processed so far, stored as a plain
+text ISO timestamp under `data/_state/`. On each run the pipeline reads only rows
+strictly newer than it, appends the cleaned batch to an accumulating **clean fact
+layer**, advances the watermark, then rebuilds the curated mart from the whole
+clean layer — de-duplicating by `order_id` so a corrected order arriving in a
+later batch supersedes the earlier one.
+
+```bash
+python -m etl.pipeline                 # incremental (default)
+python -m etl.pipeline --full-refresh  # ignore watermark, rebuild from scratch
+```
+
 ## Project layout
 
 ```
 src/etl/
   extract.py      # typed readers for orders and customers
-  transform.py    # clean_orders, enrich_orders, daily_category_revenue
+  transform.py    # clean_orders, latest_per_order, enrich_orders, daily_category_revenue
+  incremental.py  # watermark read/write, select_new, high_watermark
   quality.py      # composable data quality checks + run_checks gate
   pipeline.py     # wires the stages together (entry point)
 scripts/
@@ -86,6 +111,13 @@ runs it on every push and pull request via GitHub Actions.
   trivial to unit test without touching the filesystem.
 - **Quality as a gate** — `run_checks` raises `DataQualityError`, so bad data
   never reaches the curated layer.
+- **Incremental by watermark** — only new source rows are processed each run. The
+  watermark is advanced from the *raw* batch (before cleaning drops rows), so an
+  invalid row is never re-read just because it was filtered out. The curated mart
+  is rebuilt from the clean layer rather than appended to, which keeps daily
+  aggregates correct when a day's orders span more than one batch — trading a full
+  mart recompute for guaranteed correctness. (Partitioning that mart rebuild to
+  only touched days is the next step.)
 - **Reproducible data** — the generator is seeded; the committed sample makes the
   repo runnable out of the box.
 

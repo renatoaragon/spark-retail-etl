@@ -9,6 +9,21 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
 
+def latest_per_order(orders: DataFrame) -> DataFrame:
+    """Keep the latest row per ``order_id`` by parsed ``order_ts``.
+
+    Used both within a single batch (in :func:`clean_orders`) and across the
+    whole accumulating clean layer when the mart is rebuilt, so a corrected
+    order landing in a later incremental batch supersedes the earlier one.
+    """
+    dedup_window = Window.partitionBy("order_id").orderBy(F.col("order_ts").desc())
+    return (
+        orders.withColumn("_rn", F.row_number().over(dedup_window))
+        .filter(F.col("_rn") == 1)
+        .drop("_rn")
+    )
+
+
 def clean_orders(orders: DataFrame) -> DataFrame:
     """Drop invalid rows, cast types and deduplicate.
 
@@ -28,12 +43,7 @@ def clean_orders(orders: DataFrame) -> DataFrame:
         & (F.col("unit_price") > 0)
     )
 
-    dedup_window = Window.partitionBy("order_id").orderBy(F.col("order_ts").desc())
-    return (
-        valid.withColumn("_rn", F.row_number().over(dedup_window))
-        .filter(F.col("_rn") == 1)
-        .drop("_rn")
-    )
+    return latest_per_order(valid)
 
 
 def enrich_orders(clean: DataFrame, customers: DataFrame) -> DataFrame:
