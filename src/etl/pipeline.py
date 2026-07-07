@@ -10,6 +10,7 @@ to ignore the watermark and rebuild everything.
 
 import argparse
 import shutil
+from pathlib import Path
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
@@ -55,7 +56,12 @@ def build_spark(app_name: str = "retail-etl") -> SparkSession:
 
 
 def _clear(path: str) -> None:
-    shutil.rmtree(path, ignore_errors=True)
+    """Remove a path whether it is a Parquet directory or a state file."""
+    p = Path(path)
+    if p.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+    elif p.exists():
+        p.unlink()
 
 
 def run(spark: SparkSession, full_refresh: bool = False) -> None:
