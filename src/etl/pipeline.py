@@ -3,12 +3,16 @@
 The pipeline is incremental by default: it processes only source rows newer
 than the high-watermark of the last successful run, appends them to an
 accumulating clean fact layer, then rebuilds the curated mart from that layer.
-Pass ``--full-refresh`` to ignore the watermark and rebuild everything.
+Both layers are partitioned by ``order_date`` so an incremental run only
+rewrites the day-partitions its batch actually touched. Pass ``--full-refresh``
+to ignore the watermark and rebuild everything.
 """
 
 import argparse
+import shutil
 
 from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
 
 from etl.config import PATHS
 from etl.extract import read_customers, read_orders
@@ -27,9 +31,12 @@ from etl.quality import (
 from etl.transform import (
     clean_orders,
     daily_category_revenue,
+    distinct_dates,
     enrich_orders,
     latest_per_order,
 )
+
+PARTITION_COL = "order_date"
 
 
 def build_spark(app_name: str = "retail-etl") -> SparkSession:
@@ -37,11 +44,25 @@ def build_spark(app_name: str = "retail-etl") -> SparkSession:
         SparkSession.builder.appName(app_name)
         .master("local[*]")
         .config("spark.sql.shuffle.partitions", "4")
+        # Only replace the partitions present in the written DataFrame, leaving
+        # untouched day-partitions in place on an incremental run.
+        .config("spark.sql.sources.partitionOverwriteMode", "dynamic")
         .getOrCreate()
     )
 
 
+def _clear(path: str) -> None:
+    shutil.rmtree(path, ignore_errors=True)
+
+
 def run(spark: SparkSession, full_refresh: bool = False) -> None:
+    if full_refresh:
+        # "From scratch": drop the clean layer, mart and watermark so no stale
+        # day-partition survives a rebuild.
+        _clear(PATHS.clean)
+        _clear(PATHS.curated)
+        _clear(PATHS.watermark)
+
     orders = read_orders(spark, PATHS.raw_orders)
 
     watermark = None if full_refresh else read_watermark(PATHS.watermark)
@@ -64,18 +85,30 @@ def run(spark: SparkSession, full_refresh: bool = False) -> None:
         ]
     )
 
-    # First run (or full refresh) overwrites the clean layer; later runs append.
-    append = not full_refresh and watermark is not None
-    clean.write.mode("append" if append else "overwrite").parquet(PATHS.clean)
-    write_watermark(PATHS.watermark, batch_high)
+    first_load = full_refresh or watermark is None
+    # First load overwrites the clean layer; later runs append new partitions.
+    clean.write.partitionBy(PARTITION_COL).mode(
+        "overwrite" if first_load else "append"
+    ).parquet(PATHS.clean)
 
-    # Rebuild the mart from the whole clean layer, de-duplicating across batches
-    # so a corrected order in a later batch supersedes its earlier version.
+    # Rebuild the mart from the clean layer, de-duplicating across batches so a
+    # corrected order in a later batch supersedes its earlier version. On an
+    # incremental run, only the day-partitions this batch touched are recomputed
+    # and (via dynamic overwrite) rewritten; every other day is left untouched.
     all_clean = latest_per_order(spark.read.parquet(PATHS.clean))
+    if not first_load:
+        touched = distinct_dates(clean, PARTITION_COL)
+        all_clean = all_clean.filter(F.col(PARTITION_COL).isin(touched))
+
     customers = read_customers(spark, PATHS.raw_customers)
     curated = daily_category_revenue(enrich_orders(all_clean, customers))
 
-    curated.write.mode("overwrite").parquet(PATHS.curated)
+    curated.write.partitionBy(PARTITION_COL).mode("overwrite").parquet(PATHS.curated)
+
+    # Advance the watermark only after the mart write succeeds. If anything
+    # above fails, the watermark stays put and the whole batch is retried on the
+    # next run rather than being silently skipped with a stale mart.
+    write_watermark(PATHS.watermark, batch_high)
     print(
         f"Processed up to watermark {batch_high}; "
         f"wrote curated mart to {PATHS.curated}"

@@ -46,6 +46,15 @@ def clean_orders(orders: DataFrame) -> DataFrame:
     return latest_per_order(valid)
 
 
+def distinct_dates(orders: DataFrame, col: str = "order_date") -> list:
+    """Return the distinct partition dates present in a batch.
+
+    Used to scope the incremental mart rebuild to only the day-partitions the
+    current batch touched.
+    """
+    return [row[col] for row in orders.select(col).distinct().collect()]
+
+
 def enrich_orders(clean: DataFrame, customers: DataFrame) -> DataFrame:
     """Add revenue and customer country via a left join."""
     with_revenue = clean.withColumn(
