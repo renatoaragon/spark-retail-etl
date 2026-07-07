@@ -19,6 +19,8 @@ class Paths:
     curated: str = str(PROJECT_ROOT / "data" / "curated" / "daily_category_revenue")
     # Small state file holding the high-watermark of the last successful run.
     watermark: str = str(PROJECT_ROOT / "data" / "_state" / "orders.watermark")
+    # Row counts of past successful runs, for the volume-anomaly check.
+    volume_history: str = str(PROJECT_ROOT / "data" / "_state" / "volumes.log")
 
 
 PATHS = Paths()

@@ -5,6 +5,7 @@ pipeline stops before writing bad data downstream.
 """
 
 from dataclasses import dataclass
+from statistics import median
 
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
@@ -46,6 +47,51 @@ def check_unique(df: DataFrame, column: str) -> CheckResult:
         name=f"unique[{column}]",
         passed=total == distinct,
         detail=f"{total - distinct} duplicate(s)",
+    )
+
+
+def check_volume_anomaly(
+    current: int,
+    history: list[int],
+    tolerance: float = 0.5,
+    min_history: int = 3,
+) -> CheckResult:
+    """Flag a run whose row count deviates abnormally from recent history.
+
+    Compares ``current`` against the **median** of prior run counts (robust to a
+    single outlier) and fails if it falls outside ``median * (1 ± tolerance)``.
+    Until ``min_history`` runs have been recorded there is no baseline to judge
+    against, so the check passes. A non-positive baseline (e.g. all-zero history)
+    also passes, since a ratio band is meaningless there.
+
+    Catches upstream breakage that the per-row checks cannot see: a truncated
+    source (far too few rows) or a duplicated/fan-out load (far too many).
+    """
+    n = len(history)
+    if n < min_history:
+        return CheckResult(
+            name="volume_anomaly",
+            passed=True,
+            detail=f"insufficient history (n={n} < {min_history})",
+        )
+
+    baseline = median(history)
+    if baseline <= 0:
+        return CheckResult(
+            name="volume_anomaly",
+            passed=True,
+            detail=f"no positive baseline (median={baseline:g})",
+        )
+
+    lower = baseline * (1 - tolerance)
+    upper = baseline * (1 + tolerance)
+    return CheckResult(
+        name="volume_anomaly",
+        passed=lower <= current <= upper,
+        detail=(
+            f"{current} rows vs baseline {baseline:g} "
+            f"(allowed {lower:g}..{upper:g}, ±{tolerance:.0%})"
+        ),
     )
 
 

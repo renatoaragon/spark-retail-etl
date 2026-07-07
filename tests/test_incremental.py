@@ -1,5 +1,7 @@
 from etl.incremental import (
+    append_volume,
     high_watermark,
+    read_volume_history,
     read_watermark,
     select_new,
     write_watermark,
@@ -17,6 +19,16 @@ def test_watermark_roundtrip(tmp_path):
 
     write_watermark(path, "2025-01-02 08:30:00")  # overwrites
     assert read_watermark(path) == "2025-01-02 08:30:00"
+
+
+def test_volume_history_roundtrip(tmp_path):
+    path = str(tmp_path / "state" / "volumes.log")
+    assert read_volume_history(path) == []  # nothing recorded yet
+
+    append_volume(path, 100)
+    append_volume(path, 120)
+    append_volume(path, 95)
+    assert read_volume_history(path) == [100, 120, 95]  # order preserved
 
 
 def test_select_new_returns_all_when_no_watermark(spark):
