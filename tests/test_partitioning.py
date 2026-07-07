@@ -1,23 +1,8 @@
 import os
 
-import pytest
 from pyspark.sql import functions as F
 
 MART_COLS = ["order_date", "category", "total_revenue", "orders", "units"]
-
-
-@pytest.fixture
-def parquet_ok(spark, tmp_path):
-    """Skip on environments where local Parquet writes are unavailable.
-
-    On Windows without HADOOP_HOME/winutils, Spark cannot write Parquet. CI runs
-    on Linux where this fixture is a no-op, so the partitioning behaviour is
-    still verified there.
-    """
-    try:
-        spark.range(1).write.mode("overwrite").parquet(str(tmp_path / "_probe"))
-    except Exception as exc:  # pragma: no cover - environment dependent
-        pytest.skip(f"local Parquet writes unavailable: {exc}")
 
 
 def _mart(spark, rows):

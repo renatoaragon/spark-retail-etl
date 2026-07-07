@@ -102,8 +102,11 @@ pytest -q
 ```
 
 The suite validates the cleaning rules (invalid-row filtering, deduplication),
-the revenue/enrichment logic, the aggregation, and each data quality check. CI
-runs it on every push and pull request via GitHub Actions.
+the revenue/enrichment logic, the aggregation, each data quality check, and an
+end-to-end run of the incremental pipeline across two batches. CI runs it on a
+**Python 3.10 / 3.11 matrix** with a **coverage gate** on every push and pull
+request via GitHub Actions. Tests that write Parquet skip automatically on
+Windows without winutils and run on the Linux CI.
 
 ## Design notes
 
