@@ -137,6 +137,14 @@ Windows without winutils and run on the Linux CI.
 - **Reproducible data** — the generator is seeded; the committed sample makes the
   repo runnable out of the box.
 
+## Architecture decisions
+
+The non-obvious design choices are recorded as ADRs under
+[`docs/adr/`](docs/adr/):
+
+- [ADR 0001 — Incremental load with a file-based watermark](docs/adr/0001-incremental-load-with-watermark.md)
+- [ADR 0002 — Partition output tables by `order_date`](docs/adr/0002-partition-output-by-order-date.md)
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
