@@ -55,9 +55,10 @@ unit test suite in CI.
 The high-watermark is the maximum `order_ts` processed so far, stored as a plain
 text ISO timestamp under `data/_state/`. On each run the pipeline reads only rows
 strictly newer than it, appends the cleaned batch to an accumulating **clean fact
-layer**, advances the watermark, then rebuilds the curated mart from the whole
-clean layer — de-duplicating by `order_id` so a corrected order arriving in a
-later batch supersedes the earlier one.
+layer**, then rebuilds the curated mart — de-duplicating by `order_id` so a
+corrected order arriving in a later batch supersedes the earlier one. Both the
+clean layer and the mart are **partitioned by `order_date`**, and an incremental
+run recomputes only the day-partitions its batch touched (see below).
 
 ```bash
 python -m etl.pipeline                 # incremental (default)
@@ -113,11 +114,16 @@ runs it on every push and pull request via GitHub Actions.
   never reaches the curated layer.
 - **Incremental by watermark** — only new source rows are processed each run. The
   watermark is advanced from the *raw* batch (before cleaning drops rows), so an
-  invalid row is never re-read just because it was filtered out. The curated mart
-  is rebuilt from the clean layer rather than appended to, which keeps daily
-  aggregates correct when a day's orders span more than one batch — trading a full
-  mart recompute for guaranteed correctness. (Partitioning that mart rebuild to
-  only touched days is the next step.)
+  invalid row is never re-read just because it was filtered out. It is written
+  **only after the mart write succeeds**, so a mid-run failure retries the whole
+  batch instead of silently skipping it with a stale mart.
+- **Partitioned by `order_date`** — both the clean layer and the mart partition on
+  the day. `order_date` is naturally low-cardinality (one partition per day),
+  which makes it a good partition key; something like `order_id` would explode
+  into one tiny file per order. With dynamic partition overwrite, an incremental
+  run rewrites only the day-partitions its batch touched and leaves every other
+  day byte-for-byte untouched — turning a full-mart rewrite into a few-partitions
+  rewrite while keeping aggregates correct.
 - **Reproducible data** — the generator is seeded; the committed sample makes the
   repo runnable out of the box.
 
