@@ -21,6 +21,8 @@ class Paths:
     watermark: str = str(PROJECT_ROOT / "data" / "_state" / "orders.watermark")
     # Row counts of past successful runs, for the volume-anomaly check.
     volume_history: str = str(PROJECT_ROOT / "data" / "_state" / "volumes.log")
+    # JSON summary of the last successful run (see etl.summary).
+    run_summary: str = str(PROJECT_ROOT / "data" / "_state" / "last_run.json")
 
 
 PATHS = Paths()

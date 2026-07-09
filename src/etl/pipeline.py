@@ -10,6 +10,8 @@ to ignore the watermark and rebuild everything.
 
 import argparse
 import shutil
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from pyspark.sql import SparkSession
@@ -31,6 +33,13 @@ from etl.quality import (
     check_unique,
     check_volume_anomaly,
     run_checks,
+)
+from etl.summary import (
+    STATUS_NO_NEW_DATA,
+    STATUS_SUCCESS,
+    RunSummary,
+    checks_as_dicts,
+    write_summary,
 )
 from etl.transform import (
     clean_orders,
@@ -65,6 +74,10 @@ def _clear(path: str) -> None:
 
 
 def run(spark: SparkSession, full_refresh: bool = False) -> None:
+    started = time.monotonic()
+    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    mode = "full_refresh" if full_refresh else "incremental"
+
     if full_refresh:
         # "From scratch": drop the clean layer, mart and watermark so no stale
         # day-partition survives a rebuild.
@@ -72,6 +85,8 @@ def run(spark: SparkSession, full_refresh: bool = False) -> None:
         _clear(PATHS.curated)
         _clear(PATHS.watermark)
         _clear(PATHS.volume_history)
+        # The old summary would describe outputs this rebuild is deleting.
+        _clear(PATHS.run_summary)
 
     orders = read_orders(spark, PATHS.raw_orders)
 
@@ -84,12 +99,24 @@ def run(spark: SparkSession, full_refresh: bool = False) -> None:
     batch_high = high_watermark(new_orders)
     if batch_high is None:
         print("No new source rows since last run; nothing to do.")
+        write_summary(
+            PATHS.run_summary,
+            RunSummary(
+                status=STATUS_NO_NEW_DATA,
+                mode=mode,
+                started_at=started_at,
+                duration_seconds=round(time.monotonic() - started, 3),
+                rows_in_batch=0,
+                watermark_before=watermark,
+                watermark_after=watermark,
+            ),
+        )
         return
 
     clean = clean_orders(new_orders)
     batch_count = clean.count()
     history = [] if full_refresh else read_volume_history(PATHS.volume_history)
-    run_checks(
+    checks = run_checks(
         [
             check_not_null(clean, "order_id"),
             check_unique(clean, "order_id"),
@@ -124,6 +151,19 @@ def run(spark: SparkSession, full_refresh: bool = False) -> None:
     # with a stale mart.
     append_volume(PATHS.volume_history, batch_count)
     write_watermark(PATHS.watermark, batch_high)
+    write_summary(
+        PATHS.run_summary,
+        RunSummary(
+            status=STATUS_SUCCESS,
+            mode=mode,
+            started_at=started_at,
+            duration_seconds=round(time.monotonic() - started, 3),
+            rows_in_batch=batch_count,
+            watermark_before=watermark,
+            watermark_after=batch_high,
+            checks=checks_as_dicts(checks),
+        ),
+    )
     print(
         f"Processed up to watermark {batch_high}; "
         f"wrote curated mart to {PATHS.curated}"
