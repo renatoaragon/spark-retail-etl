@@ -10,7 +10,8 @@ import dataclasses
 
 from etl import pipeline
 from etl.config import Paths
-from etl.incremental import read_volume_history, read_watermark
+from etl.incremental import read_volume_history, read_watermark, write_watermark
+from etl.summary import STATUS_NO_NEW_DATA, STATUS_SUCCESS, read_summary
 
 CUSTOMERS = "customer_id,country\nC1,PT\nC2,ES\nC3,FR\n"
 
@@ -33,6 +34,7 @@ def _paths(tmp_path):
         curated=str(root / "curated" / "mart"),
         watermark=str(root / "_state" / "orders.watermark"),
         volume_history=str(root / "_state" / "volumes.log"),
+        run_summary=str(root / "_state" / "last_run.json"),
     )
 
 
@@ -69,6 +71,15 @@ def test_incremental_pipeline_end_to_end(spark, tmp_path, parquet_ok, monkeypatc
     assert read_watermark(paths.watermark) == "2025-01-02 09:00:00"
     assert read_volume_history(paths.volume_history) == [2, 1]
 
+    # The run summary describes the second (incremental) run.
+    summary = read_summary(paths.run_summary)
+    assert summary["status"] == STATUS_SUCCESS
+    assert summary["mode"] == "incremental"
+    assert summary["rows_in_batch"] == 1
+    assert summary["watermark_before"] == "2025-01-01 11:00:00"
+    assert summary["watermark_after"] == "2025-01-02 09:00:00"
+    assert [c["passed"] for c in summary["checks"]] == [True] * 4
+
 
 def test_full_refresh_resets_state(spark, tmp_path, parquet_ok, monkeypatch):
     paths = _paths(tmp_path)
@@ -83,6 +94,29 @@ def test_full_refresh_resets_state(spark, tmp_path, parquet_ok, monkeypatch):
     mart = _mart(spark, paths)
     assert mart[("2025-01-01", "books")]["total_revenue"] == 50.0
     assert mart[("2025-01-02", "home")]["total_revenue"] == 15.0
+
+    summary = read_summary(paths.run_summary)
+    assert summary["mode"] == "full_refresh"
+    assert summary["watermark_before"] is None  # a rebuild starts from scratch
+    assert summary["rows_in_batch"] == 3
+
+
+def test_no_new_data_still_writes_a_summary(spark, tmp_path, monkeypatch):
+    # Runs everywhere: the early-return path never writes Parquet.
+    paths = _paths(tmp_path)
+    monkeypatch.setattr(pipeline, "PATHS", paths)
+    (tmp_path / "raw" / "orders.csv").write_text(DAY1, encoding="utf-8")
+    # Pretend a previous run already consumed everything in the source.
+    write_watermark(paths.watermark, "2025-01-01 11:00:00")
+
+    pipeline.run(spark, full_refresh=False)
+
+    summary = read_summary(paths.run_summary)
+    assert summary["status"] == STATUS_NO_NEW_DATA
+    assert summary["rows_in_batch"] == 0
+    assert summary["watermark_before"] == "2025-01-01 11:00:00"
+    assert summary["watermark_after"] == "2025-01-01 11:00:00"
+    assert summary["checks"] == []
 
 
 def test_paths_is_replaceable():

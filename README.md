@@ -73,6 +73,7 @@ src/etl/
   transform.py    # clean_orders, latest_per_order, enrich_orders, daily_category_revenue
   incremental.py  # watermark read/write, select_new, high_watermark
   quality.py      # composable data quality checks + run_checks gate
+  summary.py      # JSON summary of the last successful run
   pipeline.py     # wires the stages together (entry point)
 scripts/
   generate_data.py  # deterministic synthetic data generator
@@ -134,6 +135,12 @@ Windows without winutils and run on the Linux CI.
   run rewrites only the day-partitions its batch touched and leaves every other
   day byte-for-byte untouched — turning a full-mart rewrite into a few-partitions
   rewrite while keeping aggregates correct.
+- **Run summary** — every completed run writes `data/_state/last_run.json`: mode,
+  row count, watermark before/after, the verdict of every quality check, and
+  duration. It answers "what did the last run do?" without scraping logs, and is
+  the natural hook for a scheduler or alerting to read. Written **only on
+  success** (like the watermark), so after a failure it still describes the last
+  run whose outputs can be trusted.
 - **Reproducible data** — the generator is seeded; the committed sample makes the
   repo runnable out of the box.
 
