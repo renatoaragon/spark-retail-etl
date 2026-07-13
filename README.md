@@ -151,6 +151,7 @@ The non-obvious design choices are recorded as ADRs under
 
 - [ADR 0001 — Incremental load with a file-based watermark](docs/adr/0001-incremental-load-with-watermark.md)
 - [ADR 0002 — Partition output tables by `order_date`](docs/adr/0002-partition-output-by-order-date.md)
+- [ADR 0003 — Volume anomaly gate on the median of recent runs](docs/adr/0003-volume-anomaly-gate.md)
 
 ## License
 
