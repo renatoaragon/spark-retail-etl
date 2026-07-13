@@ -9,3 +9,4 @@ after the diff is forgotten.
 |-----|-------|--------|
 | [0001](0001-incremental-load-with-watermark.md) | Incremental load with a file-based watermark | Accepted |
 | [0002](0002-partition-output-by-order-date.md) | Partition output tables by `order_date` | Accepted |
+| [0003](0003-volume-anomaly-gate.md) | Volume anomaly gate on the median of recent runs | Accepted |
