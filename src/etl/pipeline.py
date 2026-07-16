@@ -30,6 +30,7 @@ from etl.incremental import (
 from etl.quality import (
     check_non_negative,
     check_not_null,
+    check_referential_integrity,
     check_unique,
     check_volume_anomaly,
     run_checks,
@@ -116,11 +117,15 @@ def run(spark: SparkSession, full_refresh: bool = False) -> None:
     clean = clean_orders(new_orders)
     batch_count = clean.count()
     history = [] if full_refresh else read_volume_history(PATHS.volume_history)
+    # Read the dimension before the gate: the referential check needs it, and
+    # an orphan order must fail here, not surface as a null country in the mart.
+    customers = read_customers(spark, PATHS.raw_customers)
     checks = run_checks(
         [
             check_not_null(clean, "order_id"),
             check_unique(clean, "order_id"),
             check_non_negative(clean, "unit_price"),
+            check_referential_integrity(clean, "customer_id", customers, "customer_id"),
             check_volume_anomaly(batch_count, history),
         ]
     )
@@ -140,7 +145,6 @@ def run(spark: SparkSession, full_refresh: bool = False) -> None:
         touched = distinct_dates(clean, PARTITION_COL)
         all_clean = all_clean.filter(F.col(PARTITION_COL).isin(touched))
 
-    customers = read_customers(spark, PATHS.raw_customers)
     curated = daily_category_revenue(enrich_orders(all_clean, customers))
 
     curated.write.partitionBy(PARTITION_COL).mode("overwrite").parquet(PATHS.curated)
