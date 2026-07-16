@@ -33,7 +33,8 @@ unit test suite in CI.
                            ▼
                     ┌─────────────┐
                     │  quality    │  not-null / unique / non-negative +
-                    └──────┬──────┘  volume-anomaly gate (raises on failure)
+                    └──────┬──────┘  referential integrity + volume anomaly
+                           │         (raises on failure)
                            ▼
                     ┌─────────────┐
                     │ clean layer │  append batch → data/clean/orders (Parquet)

@@ -78,7 +78,7 @@ def test_incremental_pipeline_end_to_end(spark, tmp_path, parquet_ok, monkeypatc
     assert summary["rows_in_batch"] == 1
     assert summary["watermark_before"] == "2025-01-01 11:00:00"
     assert summary["watermark_after"] == "2025-01-02 09:00:00"
-    assert [c["passed"] for c in summary["checks"]] == [True] * 4
+    assert [c["passed"] for c in summary["checks"]] == [True] * 5
 
 
 def test_full_refresh_resets_state(spark, tmp_path, parquet_ok, monkeypatch):

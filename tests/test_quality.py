@@ -5,6 +5,7 @@ from etl.quality import (
     DataQualityError,
     check_non_negative,
     check_not_null,
+    check_referential_integrity,
     check_unique,
     check_volume_anomaly,
     run_checks,
@@ -32,6 +33,26 @@ def test_run_checks_raises_on_failure(spark):
     df = spark.createDataFrame([(None,)], schema)
     with pytest.raises(DataQualityError):
         run_checks([check_not_null(df, "x")])
+
+
+def test_referential_integrity_detects_orphans(spark):
+    orders = spark.createDataFrame([("O1", "C1"), ("O2", "C9")], ["order_id", "customer_id"])
+    customers = spark.createDataFrame([("C1",), ("C2",)], ["customer_id"])
+
+    result = check_referential_integrity(orders, "customer_id", customers, "customer_id")
+
+    assert result.passed is False
+    assert "1 orphan" in result.detail  # C9 has no customer row
+
+
+def test_referential_integrity_passes_when_all_keys_resolve(spark):
+    orders = spark.createDataFrame([("O1", "C1"), ("O2", "C1")], ["order_id", "customer_id"])
+    customers = spark.createDataFrame([("C1",), ("C2",)], ["customer_id"])
+
+    result = check_referential_integrity(orders, "customer_id", customers, "customer_id")
+
+    assert result.passed is True
+    assert result.name == "referential_integrity[customer_id->customer_id]"
 
 
 # --- volume anomaly (pure function, no Spark needed) ---

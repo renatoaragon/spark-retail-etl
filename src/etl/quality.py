@@ -50,6 +50,29 @@ def check_unique(df: DataFrame, column: str) -> CheckResult:
     )
 
 
+def check_referential_integrity(
+    df: DataFrame, column: str, dimension: DataFrame, dim_column: str
+) -> CheckResult:
+    """Every ``column`` value must exist in the dimension's ``dim_column``.
+
+    An orphan passes every single-column check and then silently loses its
+    enrichment downstream (the customer join is a left join: the row survives
+    with a null country instead of failing). Cheaper to fail here than to
+    reverse-engineer a mart discrepancy later.
+    """
+    orphans = (
+        df.select(column)
+        .distinct()
+        .join(dimension.select(dim_column).distinct(), df[column] == dimension[dim_column], "left_anti")
+        .count()
+    )
+    return CheckResult(
+        name=f"referential_integrity[{column}->{dim_column}]",
+        passed=orphans == 0,
+        detail=f"{orphans} orphan value(s)",
+    )
+
+
 def check_volume_anomaly(
     current: int,
     history: list[int],
