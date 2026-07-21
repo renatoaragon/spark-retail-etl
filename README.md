@@ -45,8 +45,8 @@ unit test suite in CI.
                     └──────┬──────┘  (rebuilt from the full clean layer)
                            ▼
                     ┌─────────────┐
-                    │  curated    │  daily revenue / orders / units per category
-                    └──────┬──────┘
+                    │  curated    │  daily revenue / orders / customers /
+                    └──────┬──────┘  units / avg order value per category
                            ▼
             data/curated/daily_category_revenue (Parquet)
 ```

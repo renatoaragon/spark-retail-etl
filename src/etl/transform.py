@@ -66,13 +66,27 @@ def enrich_orders(clean: DataFrame, customers: DataFrame) -> DataFrame:
 
 
 def daily_category_revenue(enriched: DataFrame) -> DataFrame:
-    """Curated mart: revenue and order counts per day and category."""
+    """Curated mart: revenue, order/customer counts and average order value.
+
+    Beyond the raw totals, two figures an analyst always asks for next:
+    ``customers`` (distinct buyers, so repeat business doesn't read as reach)
+    and ``avg_order_value`` (the average ticket, computed from the same
+    de-duplicated order count rather than from row totals).
+    """
     return (
         enriched.groupBy("order_date", "category")
         .agg(
             F.round(F.sum("revenue"), 2).alias("total_revenue"),
             F.countDistinct("order_id").alias("orders"),
+            F.countDistinct("customer_id").alias("customers"),
             F.sum("quantity").alias("units"),
+        )
+        # Ticket médio = revenue / distinct orders. Guard against a zero order
+        # count defensively; a group only exists because it has rows, but the
+        # division should never be the thing that fails a run.
+        .withColumn(
+            "avg_order_value",
+            F.round(F.col("total_revenue") / F.when(F.col("orders") > 0, F.col("orders")), 2),
         )
         .orderBy("order_date", "category")
     )
