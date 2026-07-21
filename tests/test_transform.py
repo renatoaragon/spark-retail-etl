@@ -54,3 +54,24 @@ def test_daily_category_revenue_aggregates(spark):
     assert books["total_revenue"] == 50.0
     assert books["orders"] == 2
     assert books["units"] == 3
+    assert books["customers"] == 2          # two distinct buyers
+    assert books["avg_order_value"] == 25.0  # 50.0 / 2 orders
+
+
+def test_mart_counts_repeat_customer_once(spark):
+    # Same customer, two orders, same day/category: two orders but one customer,
+    # so avg_order_value stays per-order while customers reflects real reach.
+    orders = spark.createDataFrame(
+        [
+            ("O1", "C1", "2025-01-01 10:00:00", "books", 1, 10.0),
+            ("O2", "C1", "2025-01-01 14:00:00", "books", 1, 30.0),
+        ],
+        ORDER_COLS,
+    )
+    clean = clean_orders(orders)
+    customers = spark.createDataFrame([("C1", "PT")], ["customer_id", "country"])
+
+    row = daily_category_revenue(enrich_orders(clean, customers)).collect()[0]
+    assert row["orders"] == 2
+    assert row["customers"] == 1            # one buyer, twice
+    assert row["avg_order_value"] == 20.0    # 40.0 / 2 orders
